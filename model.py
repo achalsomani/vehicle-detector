@@ -7,28 +7,13 @@ def get_model(num_classes):
     # Load pre-trained model
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights='DEFAULT')
     
-    # Freeze backbone more aggressively
-    for name, param in model.backbone.named_parameters():
-        if 'body' in name:  # Only freeze ResNet body
-            param.requires_grad = False
-        
-    # Freeze batch norm layers
-    for m in model.backbone.body.modules():
-        if isinstance(m, (torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
-            m.eval()
-            m.weight.requires_grad = False
-            m.bias.requires_grad = False
+    # Unfreeze everything for overfitting test
+    for param in model.parameters():
+        param.requires_grad = True
     
     # Replace the classifier with num_classes + 1 (for background)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes + 1)
-    
-    # Optionally, verify frozen status
-    for name, param in model.named_parameters():
-        if 'backbone.body' in name:  # ResNet backbone
-            print(f"Frozen - {name}: {param.requires_grad}")
-        else:  # FPN and detection heads
-            print(f"Trainable - {name}: {param.requires_grad}")
     
     return model
 

@@ -6,6 +6,7 @@ from model import get_model, evaluate_map
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 
+
 def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, config, log_freq=100):
     model.train()
     total_loss = 0
@@ -52,27 +53,23 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, config
     
     return total_loss / len(data_loader)
 
-def evaluate(model, data_loader, device):
-    model.eval()
+def compute_validation_loss(model, data_loader, device):
     total_loss = 0
+    num_batches = 0
     
     with torch.no_grad():
         for images, targets in data_loader:
             images = [img.to(device) for img in images]
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             
-            # Need to pass targets to get loss during evaluation
             loss_dict = model(images, targets)
-            
-            # Handle both dictionary and list cases
-            if isinstance(loss_dict, dict):
-                losses = sum(loss for loss in loss_dict.values())
-                total_loss += losses.item()
-            else:
-                # Skip if no loss is computed
-                continue
+                
+            # Sum up all the losses
+            losses = sum(loss for loss in loss_dict.values())
+            total_loss += losses.item()
+            num_batches += 1
     
-    return total_loss / len(data_loader)
+    return total_loss / num_batches
 
 def main(overfit=False):
     # Configuration
@@ -82,21 +79,22 @@ def main(overfit=False):
         'val_img_dir': 'dataset/val/images',
         'val_label_file': 'dataset/val/labels.txt',
         'num_classes': 3,  # This will become 4 with background
-        'batch_size': 4,
+        'batch_size': 2,  # Smaller batch size for better overfitting
         'num_workers': 4,
         'learning_rate': 1e-4,
-        'conf_threshold': 0.5,
-        'num_epochs': 10,
+        'conf_threshold': 0.01,
+        'num_epochs': 1000,  # Train longer
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         'log_freq': 100,
         'overfit_dataset_size': 10
     }
     
-    # Initialize TensorBoard writer with unique run name
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_name = f"vehicle_detection_{timestamp}"
+    # Create a simple run name with timestamp
+    run_name = datetime.now().strftime('run_%m%d_%H%M%S')
     if overfit:
         run_name += "_overfit"
+    
+    # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir=f'runs/{run_name}')
     
     # Log hyperparameters
@@ -109,18 +107,26 @@ def main(overfit=False):
     train_loader, val_loader = get_dataloaders(
         config['train_img_dir'],
         config['train_label_file'],
-        config['val_img_dir'],
-        config['val_label_file'],
+        config['val_img_dir'] if not overfit else config['train_img_dir'],  # Use train data for validation when overfitting
+        config['val_label_file'] if not overfit else config['train_label_file'],  # Use train labels for validation when overfitting
         config['batch_size'],
         config['num_workers'],
         overfit_dataset_size=config['overfit_dataset_size'] if overfit else None
     )
     
+    print("Train dataset size:", len(train_loader.dataset))
+    print("Val dataset size:", len(val_loader.dataset))
+    
+    # Check a batch
+    for images, targets in val_loader:
+        print("Sample targets:", targets)
+        break
+    
     # Initialize model
     model = get_model(config['num_classes'])
     model = model.to(config['device'])
     
-    # Initialize optimizer
+    # Initialize optimizer (removed scheduler)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['learning_rate'])
     
     # Training loop
@@ -135,7 +141,7 @@ def main(overfit=False):
         )
         
         # Evaluate
-        val_loss = evaluate(model, val_loader, config['device'])
+        val_loss = compute_validation_loss(model, val_loader, config['device'])
         metrics = evaluate_map(model, val_loader, config['device'], conf_threshold=config['conf_threshold'])
         
         # Log losses
@@ -148,25 +154,14 @@ def main(overfit=False):
         writer.add_scalar('Metrics/val_mAP', metrics['map'], epoch)
         writer.add_scalar('Metrics/val_precision', metrics['precision'], epoch)
         writer.add_scalar('Metrics/val_recall', metrics['recall'], epoch)
-        # Per-class validation metrics
-        writer.add_scalar('Metrics/val_precision_small', metrics['precision_small'], epoch)
-        writer.add_scalar('Metrics/val_precision_medium', metrics['precision_medium'], epoch)
-        writer.add_scalar('Metrics/val_precision_large', metrics['precision_large'], epoch)
-        writer.add_scalar('Metrics/val_recall_small', metrics['recall_small'], epoch)
-        writer.add_scalar('Metrics/val_recall_medium', metrics['recall_medium'], epoch)
-        writer.add_scalar('Metrics/val_recall_large', metrics['recall_large'], epoch)
         
         print(f"Epoch {epoch+1}/{config['num_epochs']}")
         print(f"Training loss: {train_loss:.4f}")
         print(f"Validation loss: {val_loss:.4f}")
         print(f"Validation mAP: {map_score:.4f}")
         print(f"Overall - Precision: {metrics['precision']:.4f}, Recall: {metrics['recall']:.4f}")
-        print("Per-class metrics:")
-        print(f"Small  - Precision: {metrics['precision_small']:.4f}, Recall: {metrics['recall_small']:.4f}")
-        print(f"Medium - Precision: {metrics['precision_medium']:.4f}, Recall: {metrics['recall_medium']:.4f}")
-        print(f"Large  - Precision: {metrics['precision_large']:.4f}, Recall: {metrics['recall_large']:.4f}")
         
-        # Save best model
+        # Save best model with same run name
         if map_score > best_map:
             best_map = map_score
             torch.save({
@@ -174,7 +169,7 @@ def main(overfit=False):
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'map': map_score,
-            }, f'checkpoints/best_model.pth')
+            }, f'checkpoints/{run_name}_best.pth')
     
     writer.close()
 
