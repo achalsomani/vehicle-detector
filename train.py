@@ -40,7 +40,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, log_fr
             if batch_idx % (log_freq * 5) == 0:  # Less frequent for metrics
                 model.eval()
                 with torch.no_grad():
-                    metrics = evaluate_map(model, [images], targets, device)
+                    metrics = evaluate_map(model, images, device, targets)
                     for k, v in metrics.items():
                         writer.add_scalar(f'Metrics/train_{k}_step', v.item(), global_step)
                 model.train()
@@ -58,10 +58,10 @@ def main(debug=False):
         'batch_size': 4,
         'num_workers': 4,
         'learning_rate': 1e-4,
-        'num_epochs': 10,  # Reduced from 100 to 10
+        'num_epochs': 10,  
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'log_freq': 100,  # Log every 100 iterations
-        'debug_dataset_size': 100  # Number of images to use in debug mode
+        'log_freq': 100, 
+        'debug_dataset_size': 10
     }
     
     # Initialize TensorBoard writer
@@ -124,4 +124,4 @@ def main(debug=False):
     writer.close()
 
 if __name__ == "__main__":
-    main(debug=True)  # Set to True for debug mode 
+    main(debug=True) 

@@ -23,17 +23,24 @@ def get_model(num_classes):
     
     return model
 
-def evaluate_map(model, data_loader, device):
+def evaluate_map(model, data_loader, device, targets=None):
     from torchmetrics.detection.mean_ap import MeanAveragePrecision
-    metric = MeanAveragePrecision()
+    metric = MeanAveragePrecision().to(device)  # Move metric to device
     
     model.eval()
     with torch.no_grad():
-        for images, targets in data_loader:
-            images = [img.to(device) for img in images]
-            predictions = model(images)
-            
-            # Convert predictions and targets to the format expected by MeanAveragePrecision
+        if isinstance(data_loader, list):  # For single batch evaluation
+            predictions = model(data_loader)
+            # Move targets to device if provided
+            if targets:
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             metric.update(predictions, targets)
+        else:  # For full dataset evaluation
+            for images, targets in data_loader:
+                images = [img.to(device) for img in images]
+                # Move targets to device
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+                predictions = model(images)
+                metric.update(predictions, targets)
     
     return metric.compute() 

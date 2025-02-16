@@ -86,9 +86,14 @@ class VehicleDataset(Dataset):
             ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
 def get_dataloaders(train_img_dir, train_label_file, val_img_dir, val_label_file, 
-                    batch_size=4, num_workers=4):
+                    batch_size=4, num_workers=4, debug_size=None):
     train_dataset = VehicleDataset(train_img_dir, train_label_file, is_train=True)
     val_dataset = VehicleDataset(val_img_dir, val_label_file, is_train=False)
+    
+    if debug_size is not None:
+        # Limit dataset size for debugging
+        train_dataset.annotations = train_dataset.annotations[:debug_size]
+        val_dataset.annotations = val_dataset.annotations[:min(debug_size//5, len(val_dataset))]
     
     train_loader = DataLoader(
         train_dataset, 
