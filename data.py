@@ -13,8 +13,8 @@ class VehicleDataset(Dataset):
         self.is_train = is_train
         self.transform = transform or self.get_default_transforms(is_train)
         
-        # Read labels
-        self.annotations = []
+        # Group annotations by image_id
+        self.image_annotations = {}
         with open(label_file, 'r') as f:
             for line in f:
                 values = line.strip().split()
@@ -28,25 +28,36 @@ class VehicleDataset(Dataset):
                 x2 = bbox[0] + bbox[2]/2
                 y2 = bbox[1] + bbox[3]/2
                 
-                self.annotations.append({
-                    'image_id': img_id,
-                    'bbox': [x1, y1, x2, y2],
-                    'category_id': class_id - 1  # Convert to 0-based indexing
-                })
+                if img_id not in self.image_annotations:
+                    self.image_annotations[img_id] = {
+                        'boxes': [],
+                        'labels': []
+                    }
+                
+                self.image_annotations[img_id]['boxes'].append([x1, y1, x2, y2])
+                self.image_annotations[img_id]['labels'].append(class_id)
+        
+        # Convert to list for indexing
+        self.image_ids = sorted(list(self.image_annotations.keys()))
+
+    def set_overfit_dataset_size(self, overfit_dataset_size):
+        self.image_ids = self.image_ids[:overfit_dataset_size]
+        self.image_annotations = {k: self.image_annotations[k] for k in self.image_ids}
 
     def __len__(self):
-        return len(self.annotations)
+        return len(self.image_ids)
 
     def __getitem__(self, idx):
-        ann = self.annotations[idx]
-        img_name = f"{int(ann['image_id']):05d}.jpeg"
+        img_id = self.image_ids[idx]  # Get the image_id from our list
+        ann = self.image_annotations[img_id]  # Use image_id to get annotations
+        img_name = f"{img_id:05d}.jpeg"  # Use actual image_id for filename
         img_path = os.path.join(self.img_dir, img_name)
         
         image = Image.open(img_path).convert('RGB')
         image = np.array(image)
         
-        boxes = torch.tensor([ann['bbox']], dtype=torch.float32)
-        labels = torch.tensor([ann['category_id']], dtype=torch.long)
+        boxes = torch.tensor(ann['boxes'], dtype=torch.float32)
+        labels = torch.tensor(ann['labels'], dtype=torch.long)
         boxes = torch.clamp(boxes, min=0.0, max=1000.0)
         
         if self.transform:
@@ -64,7 +75,7 @@ class VehicleDataset(Dataset):
         target = {
             'boxes': boxes,
             'labels': labels,
-            'image_id': torch.tensor([ann['image_id']])
+            'image_id': torch.tensor([img_id])
         }
         
         return image, target
@@ -86,15 +97,14 @@ class VehicleDataset(Dataset):
             ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
 def get_dataloaders(train_img_dir, train_label_file, val_img_dir, val_label_file, 
-                    batch_size=4, num_workers=4, debug_size=None):
+                    batch_size=4, num_workers=4, overfit_dataset_size=None):
     train_dataset = VehicleDataset(train_img_dir, train_label_file, is_train=True)
     val_dataset = VehicleDataset(val_img_dir, val_label_file, is_train=False)
     
-    if debug_size is not None:
-        # Limit dataset size for debugging
-        train_dataset.annotations = train_dataset.annotations[:debug_size]
-        val_dataset.annotations = val_dataset.annotations[:min(debug_size//5, len(val_dataset))]
-    
+    if overfit_dataset_size is not None:
+        train_dataset.set_overfit_dataset_size(overfit_dataset_size)
+        val_dataset.set_overfit_dataset_size(overfit_dataset_size)
+
     train_loader = DataLoader(
         train_dataset, 
         batch_size=batch_size,

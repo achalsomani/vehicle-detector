@@ -1,18 +1,27 @@
 import torch
 import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+import numpy as np
 
 def get_model(num_classes):
     # Load pre-trained model
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights='DEFAULT')
     
-    # Freeze the entire backbone
-    for param in model.backbone.body.parameters():
-        param.requires_grad = False
+    # Freeze backbone more aggressively
+    for name, param in model.backbone.named_parameters():
+        if 'body' in name:  # Only freeze ResNet body
+            param.requires_grad = False
+        
+    # Freeze batch norm layers
+    for m in model.backbone.body.modules():
+        if isinstance(m, (torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+            m.eval()
+            m.weight.requires_grad = False
+            m.bias.requires_grad = False
     
-    # Replace the classifier with a new one for our number of classes
+    # Replace the classifier with num_classes + 1 (for background)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
-    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes + 1)
     
     # Optionally, verify frozen status
     for name, param in model.named_parameters():
@@ -23,7 +32,7 @@ def get_model(num_classes):
     
     return model
 
-def evaluate_map(model, data_loader, device, targets=None):
+def evaluate_map(model, data_loader, device, targets=None, conf_threshold=0.5):
     from torchmetrics.detection.mean_ap import MeanAveragePrecision
     metric = MeanAveragePrecision(box_format='xyxy', class_metrics=True).to(device)
     
@@ -31,46 +40,94 @@ def evaluate_map(model, data_loader, device, targets=None):
     with torch.no_grad():
         if isinstance(data_loader, list):
             predictions = model(data_loader)
+            predictions = [{
+                'boxes': pred['boxes'][pred['scores'] > conf_threshold],
+                'labels': pred['labels'][pred['scores'] > conf_threshold],
+                'scores': pred['scores'][pred['scores'] > conf_threshold]
+            } for pred in predictions]
             if targets:
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+            
+            # Debug prints
+            print("\nPredictions:")
+            for pred in predictions:
+                print(f"Labels: {pred['labels']}")
+                print(f"Scores: {pred['scores']}")
+            print("\nTargets:")
+            for target in targets:
+                print(f"Labels: {target['labels']}")
+            
             metric.update(predictions, targets)
         else:
             for images, targets in data_loader:
                 images = [img.to(device) for img in images]
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
                 predictions = model(images)
-                metric.update(predictions, targets)
+                
+                # Apply confidence threshold filtering to predictions (added for consistency)
+                filtered_predictions = [{
+                    'boxes': pred['boxes'][pred['scores'] > conf_threshold],
+                    'labels': pred['labels'][pred['scores'] > conf_threshold],
+                    'scores': pred['scores'][pred['scores'] > conf_threshold]
+                } for pred in predictions]
+                
+                # Debug prints for first batch
+                if not hasattr(evaluate_map, 'debug_printed'):
+                    print("\nFirst batch predictions:")
+                    for pred in filtered_predictions:  # print filtered predictions
+                        print(f"Labels: {pred['labels']}")
+                        print(f"Scores: {pred['scores']}")
+                    print("\nFirst batch targets:")
+                    for target in targets:
+                        print(f"Labels: {target['labels']}")
+                    evaluate_map.debug_printed = True
+                
+                metric.update(filtered_predictions, targets)
     
     metrics = metric.compute()
+    print("\nRaw metrics:", {k: v.cpu().numpy() if torch.is_tensor(v) else v 
+                            for k, v in metrics.items()})
     
-    # Safely get per-class metrics with more error handling
-    try:
-        if torch.is_tensor(metrics['map_per_class']):
-            map_per_class = metrics['map_per_class'].tolist()
-            # Pad with zeros if we have fewer than 3 classes
-            map_per_class.extend([0.0] * (3 - len(map_per_class)))
-        else:
-            map_per_class = [0.0, 0.0, 0.0]
-            
-        if torch.is_tensor(metrics['mar_100_per_class']):
-            mar_per_class = metrics['mar_100_per_class'].tolist()
-            # Pad with zeros if we have fewer than 3 classes
-            mar_per_class.extend([0.0] * (3 - len(mar_per_class)))
-        else:
-            mar_per_class = [0.0, 0.0, 0.0]
-    except:
-        map_per_class = [0.0, 0.0, 0.0]
-        mar_per_class = [0.0, 0.0, 0.0]
+    # Initialize result with default values
+    result = {
+        'map': 0.0,
+        'precision': 0.0,
+        'recall': 0.0,
+        'precision_small': 0.0,
+        'precision_medium': 0.0,
+        'precision_large': 0.0,
+        'recall_small': 0.0,
+        'recall_medium': 0.0,
+        'recall_large': 0.0
+    }
     
-    # Return overall and per-class metrics
-    return {
-        'map': metrics['map'].item() if torch.is_tensor(metrics['map']) else metrics['map'],
-        'precision': metrics['map_50'].item() if torch.is_tensor(metrics['map_50']) else metrics['map_50'],
-        'recall': metrics['mar_100'].item() if torch.is_tensor(metrics['mar_100']) else metrics['mar_100'],
-        'precision_car': map_per_class[0],
-        'precision_mid': map_per_class[1],
-        'precision_large': map_per_class[2],
-        'recall_car': mar_per_class[0],
-        'recall_mid': mar_per_class[1],
-        'recall_large': mar_per_class[2]
-    } 
+    # Update with actual values if they exist
+    if torch.is_tensor(metrics['map']):
+        result['map'] = metrics['map'].item()
+    if torch.is_tensor(metrics['map_50']):
+        result['precision'] = metrics['map_50'].item()
+    if torch.is_tensor(metrics['mar_100']):
+        result['recall'] = metrics['mar_100'].item()
+        
+    # Handle per-class metrics
+    if 'map_per_class' in metrics and torch.is_tensor(metrics['map_per_class']):
+        per_class_map = metrics['map_per_class'].cpu().numpy()
+        if isinstance(per_class_map, np.ndarray):
+            if per_class_map.ndim > 0:  # Check if it's not a scalar
+                if per_class_map.size > 0: result['precision_small'] = max(0.0, float(per_class_map[0]))
+                if per_class_map.size > 1: result['precision_medium'] = max(0.0, float(per_class_map[1]))
+                if per_class_map.size > 2: result['precision_large'] = max(0.0, float(per_class_map[2]))
+            else:
+                result['precision_small'] = max(0.0, float(per_class_map))
+        
+    if 'mar_100_per_class' in metrics and torch.is_tensor(metrics['mar_100_per_class']):
+        per_class_mar = metrics['mar_100_per_class'].cpu().numpy()
+        if isinstance(per_class_mar, np.ndarray):
+            if per_class_mar.ndim > 0:
+                if per_class_mar.size > 0: result['recall_small'] = max(0.0, float(per_class_mar[0]))
+                if per_class_mar.size > 1: result['recall_medium'] = max(0.0, float(per_class_mar[1]))
+                if per_class_mar.size > 2: result['recall_large'] = max(0.0, float(per_class_mar[2]))
+            else:
+                result['recall_small'] = max(0.0, float(per_class_mar))
+    
+    return result 
