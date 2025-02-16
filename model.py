@@ -47,16 +47,6 @@ def evaluate_map(model, data_loader, device, targets=None, conf_threshold=0.5):
             } for pred in predictions]
             if targets:
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-            
-            # Debug prints
-            print("\nPredictions:")
-            for pred in predictions:
-                print(f"Labels: {pred['labels']}")
-                print(f"Scores: {pred['scores']}")
-            print("\nTargets:")
-            for target in targets:
-                print(f"Labels: {target['labels']}")
-            
             metric.update(predictions, targets)
         else:
             for images, targets in data_loader:
@@ -64,29 +54,16 @@ def evaluate_map(model, data_loader, device, targets=None, conf_threshold=0.5):
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
                 predictions = model(images)
                 
-                # Apply confidence threshold filtering to predictions (added for consistency)
+                # Apply confidence threshold filtering to predictions
                 filtered_predictions = [{
                     'boxes': pred['boxes'][pred['scores'] > conf_threshold],
                     'labels': pred['labels'][pred['scores'] > conf_threshold],
                     'scores': pred['scores'][pred['scores'] > conf_threshold]
                 } for pred in predictions]
                 
-                # Debug prints for first batch
-                if not hasattr(evaluate_map, 'debug_printed'):
-                    print("\nFirst batch predictions:")
-                    for pred in filtered_predictions:  # print filtered predictions
-                        print(f"Labels: {pred['labels']}")
-                        print(f"Scores: {pred['scores']}")
-                    print("\nFirst batch targets:")
-                    for target in targets:
-                        print(f"Labels: {target['labels']}")
-                    evaluate_map.debug_printed = True
-                
                 metric.update(filtered_predictions, targets)
     
     metrics = metric.compute()
-    print("\nRaw metrics:", {k: v.cpu().numpy() if torch.is_tensor(v) else v 
-                            for k, v in metrics.items()})
     
     # Initialize result with default values
     result = {
