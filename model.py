@@ -7,7 +7,6 @@ def get_model(num_classes):
     # Load pre-trained model
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights='DEFAULT')
     
-    # Unfreeze everything for overfitting test
     for param in model.parameters():
         param.requires_grad = True
     
