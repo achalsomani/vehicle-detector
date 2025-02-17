@@ -18,6 +18,39 @@ def get_model(num_classes):
 
 def evaluate_map(model, data_loader, device, targets=None, conf_threshold=0.5):
     from torchmetrics.detection.mean_ap import MeanAveragePrecision
+    metric = MeanAveragePrecision(box_format='xyxy').to(device)
+    
+    model.eval()
+    with torch.no_grad():
+        if isinstance(data_loader, list):
+            predictions = model(data_loader)
+            predictions = [{
+                'boxes': pred['boxes'][pred['scores'] > conf_threshold],
+                'labels': pred['labels'][pred['scores'] > conf_threshold],
+                'scores': pred['scores'][pred['scores'] > conf_threshold]
+            } for pred in predictions]
+            if targets:
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+            metric.update(predictions, targets)
+        else:
+            for images, targets in data_loader:
+                images = [img.to(device) for img in images]
+                targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+                predictions = model(images)
+                
+                filtered_predictions = [{
+                    'boxes': pred['boxes'][pred['scores'] > conf_threshold],
+                    'labels': pred['labels'][pred['scores'] > conf_threshold],
+                    'scores': pred['scores'][pred['scores'] > conf_threshold]
+                } for pred in predictions]
+                
+                metric.update(filtered_predictions, targets)
+    
+    metrics = metric.compute()
+    return metrics['map'].item()
+
+def evaluate_map_with_details(model, data_loader, device, targets=None, conf_threshold=0.5):
+    from torchmetrics.detection.mean_ap import MeanAveragePrecision
     metric = MeanAveragePrecision(box_format='xyxy', class_metrics=True).to(device)
     
     model.eval()

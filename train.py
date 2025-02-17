@@ -34,20 +34,11 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, config
         if batch_idx % log_freq == 0:
             writer.add_scalar('loss/train', current_loss, global_step)
             
+            # Evaluate mAP on current batch
             model.eval()
             with torch.no_grad():
-                metrics = evaluate_map(model, images, device, targets, conf_threshold=config['conf_threshold'])
-                # Overall metrics
-                writer.add_scalar('metrics/train_mAP', metrics['map'], global_step)
-                writer.add_scalar('metrics/train_precision', metrics['precision'], global_step)
-                writer.add_scalar('metrics/train_recall', metrics['recall'], global_step)
-                # Per-class metrics
-                writer.add_scalar('class_metrics/train_precision_small', metrics['precision_small'], global_step)
-                writer.add_scalar('class_metrics/train_precision_medium', metrics['precision_medium'], global_step)
-                writer.add_scalar('class_metrics/train_precision_large', metrics['precision_large'], global_step)
-                writer.add_scalar('class_metrics/train_recall_small', metrics['recall_small'], global_step)
-                writer.add_scalar('class_metrics/train_recall_medium', metrics['recall_medium'], global_step)
-                writer.add_scalar('class_metrics/train_recall_large', metrics['recall_large'], global_step)
+                map_score = evaluate_map(model, images, device, targets, conf_threshold=config['conf_threshold'])
+                writer.add_scalar('metrics/train_mAP', map_score, global_step)
             model.train()
     
     return total_loss / len(data_loader)
@@ -77,10 +68,11 @@ def main(overfit=False):
         'train_label_file': 'dataset/train/labels.txt',
         'val_img_dir': 'dataset/val/images',
         'val_label_file': 'dataset/val/labels.txt',
-        'num_classes': 3,  # This will become 4 with background
+        'num_classes': 3,
         'batch_size': 4,
         'num_workers': 4,
-        'learning_rate': 1e-4,
+        'backbone_lr': 5e-5,
+        'classifier_lr': 1e-4,
         'conf_threshold': 0.1,
         'num_epochs': 10,
         'device': 'cuda',
@@ -95,8 +87,6 @@ def main(overfit=False):
     
     # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir=f'runs/{run_name}')
-    
-    # Log hyperparameters
     writer.add_text('config', str(config))
     
     # Create output directory
@@ -106,24 +96,36 @@ def main(overfit=False):
     train_loader, val_loader = get_dataloaders(
         config['train_img_dir'],
         config['train_label_file'],
-        config['val_img_dir'] if not overfit else config['train_img_dir'],  # Use train data for validation when overfitting
-        config['val_label_file'] if not overfit else config['train_label_file'],  # Use train labels for validation when overfitting
+        config['val_img_dir'] if not overfit else config['train_img_dir'],
+        config['val_label_file'] if not overfit else config['train_label_file'],
         config['batch_size'],
         config['num_workers'],
         overfit_dataset_size=config['overfit_dataset_size'] if overfit else None
     )
     
-    print("Train dataset size:", len(train_loader.dataset))
-    print("Val dataset size:", len(val_loader.dataset))
-    
-    for images, targets in val_loader:
-        print("Sample targets:", targets)
-        break
-    
     model = get_model(config['num_classes'])
     model = model.to(config['device'])
     
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config['learning_rate'])
+    # Separate backbone and classifier parameters
+    backbone_params = []
+    classifier_params = []
+    
+    for name, param in model.named_parameters():
+        if "box_predictor" in name:
+            classifier_params.append(param)
+        else:
+            backbone_params.append(param)
+    
+    # Create optimizer with different learning rates
+    optimizer = torch.optim.AdamW([
+        {'params': backbone_params, 'lr': config['backbone_lr']},
+        {'params': classifier_params, 'lr': config['classifier_lr']}
+    ])
+    
+    # Learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=0.3, patience=2, verbose=True
+    )
     
     # Training loop
     best_map = 0
@@ -132,47 +134,33 @@ def main(overfit=False):
         train_loss = train_one_epoch(
             model, optimizer, train_loader, 
             config['device'], epoch, writer, 
-            config,
-            config['log_freq']
+            config, config['log_freq']
         )
         
         # Evaluate
         val_loss = compute_validation_loss(model, val_loader, config['device'])
-        metrics = evaluate_map(model, val_loader, config['device'], conf_threshold=config['conf_threshold'])
+        val_map = evaluate_map(model, val_loader, config['device'], conf_threshold=config['conf_threshold'])
         
-        # Log losses
+        # Log metrics
         writer.add_scalar('loss/train_epoch', train_loss, epoch)
         writer.add_scalar('loss/val_epoch', val_loss, epoch)
+        writer.add_scalar('metrics/val_mAP', val_map, epoch)
         
-        map_score = metrics['map']
+        scheduler.step(val_loss)
         
-        # Log validation metrics
-        writer.add_scalar('metrics/val_mAP', metrics['map'], epoch)
-        writer.add_scalar('metrics/val_precision', metrics['precision'], epoch)
-        writer.add_scalar('metrics/val_recall', metrics['recall'], epoch)
-        
-        # Log per-class metrics
-        writer.add_scalar('class_metrics/val_precision_small', metrics['precision_small'], epoch)
-        writer.add_scalar('class_metrics/val_precision_medium', metrics['precision_medium'], epoch)
-        writer.add_scalar('class_metrics/val_precision_large', metrics['precision_large'], epoch)
-        writer.add_scalar('class_metrics/val_recall_small', metrics['recall_small'], epoch)
-        writer.add_scalar('class_metrics/val_recall_medium', metrics['recall_medium'], epoch)
-        writer.add_scalar('class_metrics/val_recall_large', metrics['recall_large'], epoch)
-
         print(f"Epoch {epoch+1}/{config['num_epochs']}")
         print(f"Training loss: {train_loss:.4f}")
         print(f"Validation loss: {val_loss:.4f}")
-        print(f"Validation mAP: {map_score:.4f}")
-        print(f"Overall - Precision: {metrics['precision']:.4f}, Recall: {metrics['recall']:.4f}")
+        print(f"Validation mAP: {val_map:.4f}")
         
-        # Save best model with same run name
-        if map_score > best_map:
-            best_map = map_score
+        # Save best model
+        if val_map > best_map:
+            best_map = val_map
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'map': map_score,
+                'map': val_map,
             }, f'checkpoints/{run_name}_best.pth')
     
     writer.close()
