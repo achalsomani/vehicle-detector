@@ -178,4 +178,4 @@ def main(overfit=False):
     writer.close()
 
 if __name__ == "__main__":
-    main(overfit=True)
+    main(overfit=False)
