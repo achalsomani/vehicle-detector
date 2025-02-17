@@ -64,17 +64,17 @@ def compute_validation_loss(model, data_loader, device):
 def main(overfit=False):
     # Configuration
     config = {
-        'train_img_dir': 'dataset/train/images',
-        'train_label_file': 'dataset/train/labels.txt',
-        'val_img_dir': 'dataset/val/images',
-        'val_label_file': 'dataset/val/labels.txt',
+        'train_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/images',
+        'train_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/labels.txt',
+        'val_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/images',
+        'val_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/labels.txt',
         'num_classes': 3,
-        'batch_size': 4,
-        'num_workers': 4,
+        'batch_size':32,
+        'num_workers': 32,
         'backbone_lr': 5e-5,
         'classifier_lr': 1e-4,
         'conf_threshold': 0.1,
-        'num_epochs': 10,
+        'num_epochs': 30,
         'device': 'cuda',
         'log_freq': 100,
         'overfit_dataset_size': 10
@@ -124,7 +124,7 @@ def main(overfit=False):
     
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.3, patience=2, verbose=True
+        optimizer, mode='max', factor=0.2, patience=2, verbose=True
     )
     
     # Training loop

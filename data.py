@@ -68,7 +68,7 @@ class VehicleDataset(Dataset):
             )
             image = transformed['image']
             boxes = torch.tensor(transformed['bboxes'])
-            labels = torch.tensor(transformed['class_labels'])
+            labels = torch.tensor(transformed['class_labels'], dtype=torch.long)
             
             boxes = torch.clamp(boxes, min=0.0, max=1024.0)
         
@@ -86,13 +86,13 @@ class VehicleDataset(Dataset):
             return A.Compose([
                 A.Resize(1024, 1024),
                 A.HorizontalFlip(p=0.5),
-                A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                #A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ToTensorV2(),
             ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         else:
             return A.Compose([
                 A.Resize(1024, 1024),
-                A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                #A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ToTensorV2(),
             ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
