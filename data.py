@@ -78,6 +78,9 @@ class VehicleDataset(Dataset):
             'image_id': torch.tensor([img_id])
         }
         
+        # Convert labels to int64
+        target['labels'] = target['labels'].to(torch.int64)
+        
         return image, target
 
     @staticmethod
