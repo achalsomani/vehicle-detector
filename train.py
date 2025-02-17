@@ -2,7 +2,7 @@ import os
 import torch
 from tqdm import tqdm
 from data import get_dataloaders
-from model import get_model, evaluate_map
+from model import get_model, evaluate_map, evaluate_map_with_details
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 
@@ -139,7 +139,8 @@ def main(overfit=False):
         
         # Evaluate
         val_loss = compute_validation_loss(model, val_loader, config['device'])
-        val_map = evaluate_map(model, val_loader, config['device'], conf_threshold=config['conf_threshold'])
+        val_metrics = evaluate_map_with_details(model, val_loader, config['device'], conf_threshold=config['conf_threshold'])
+        val_map = val_metrics['map']
         
         # Log metrics
         writer.add_scalar('loss/train_epoch', train_loss, epoch)
@@ -162,6 +163,9 @@ def main(overfit=False):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'map': val_map,
             }, f'checkpoints/{run_name}_best.pth')
+        
+        print(f"Validation Precision: {val_metrics['precision']:.4f}")
+        print(f"Validation Recall: {val_metrics['recall']:.4f}")
     
     writer.close()
 
