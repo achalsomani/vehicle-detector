@@ -9,6 +9,7 @@ from model import get_model
 from PIL import Image, ImageDraw
 from paths import test_img_dir
 from config import batch_size, num_workers
+from torchvision.ops import nms
 
 
 def load_checkpoint(checkpoint_path, num_classes, device):
@@ -19,6 +20,25 @@ def load_checkpoint(checkpoint_path, num_classes, device):
     model = model.to(device)
     model.eval()
     return model
+
+def apply_nms_to_predictions(boxes, labels, scores, iou_threshold=0.5, score_threshold=0.3):
+    mask = scores > score_threshold
+    boxes = boxes[mask]
+    labels = labels[mask]
+    scores = scores[mask]
+    
+    if len(boxes) == 0:
+        return boxes.new_zeros((0, 4)), labels.new_zeros(0), scores.new_zeros(0)
+    
+    # Sort all boxes by score and apply NMS across classes
+    _, sorted_indices = scores.sort(descending=True)
+    boxes = boxes[sorted_indices]
+    labels = labels[sorted_indices]
+    scores = scores[sorted_indices]
+    
+    keep = nms(boxes, scores, iou_threshold=iou_threshold)
+    
+    return boxes[keep], labels[keep], scores[keep]
 
 def visualize_predictions(model, dataset, device, save_dir, num_samples=50):
     """Generate and save visualization of model predictions"""
@@ -39,12 +59,18 @@ def visualize_predictions(model, dataset, device, save_dir, num_samples=50):
         with torch.no_grad():
             prediction = model([image.to(device)])[0]
         
+        boxes, labels, scores = apply_nms_to_predictions(
+            prediction['boxes'], 
+            prediction['labels'], 
+            prediction['scores']
+        )
+        
         original_image = original_image.resize(image.shape[1:3])
 
         draw = ImageDraw.Draw(original_image)
         
         # Draw predicted boxes
-        for box, label, score in zip(prediction['boxes'], prediction['labels'], prediction['scores']):
+        for box, label, score in zip(boxes, labels, scores):
             x1, y1, x2, y2 = box.cpu().numpy()
             label = label.cpu().item()
             score = score.cpu().item()
@@ -74,22 +100,19 @@ def generate_predictions_file(model, dataset, device, output_path):
             
             image_id = target['image_id'].item()
             
-            # Filter predictions by confidence threshold
-            mask = prediction['scores'] > 0.1
-            boxes = prediction['boxes'][mask]
-            labels = prediction['labels'][mask]
-            scores = prediction['scores'][mask]
+            boxes, labels, scores = apply_nms_to_predictions(
+                prediction['boxes'], 
+                prediction['labels'], 
+                prediction['scores']
+            )
             
-            # Convert predictions to required format
             for box, label, score in zip(boxes, labels, scores):
                 x1, y1, x2, y2 = box.cpu().numpy()
-                # Convert to center format
                 cx = (x1 + x2) / 2
                 cy = (y1 + y2) / 2
                 w = x2 - x1
                 h = y2 - y1
                 
-                # Write in required format
                 f.write(f"{image_id} {label.item()} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {score.item():.6f}\n")
 
 def main():
