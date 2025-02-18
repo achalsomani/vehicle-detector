@@ -35,7 +35,6 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, config
         if batch_idx % log_freq == 0:
             writer.add_scalar('loss/train', current_loss, global_step)
             
-            # Evaluate mAP on current batch
             model.eval()
             with torch.no_grad():
                 map_score = evaluate_map(model, images, device, targets, conf_threshold=config['conf_threshold'])
@@ -71,9 +70,9 @@ def main(overfit=False):
         'num_classes': 3,
         'batch_size': batch_size,
         'num_workers': num_workers,
-        'backbone_lr': 5e-5,
+        'backbone_lr': 2e-5,
         'classifier_lr': 1e-4,
-        'conf_threshold': 0.1,
+        'conf_threshold': 0.5,
         'num_epochs': 20,
         'device': 'cuda',
         'log_freq': 100,

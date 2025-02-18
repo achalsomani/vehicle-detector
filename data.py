@@ -84,9 +84,15 @@ class VehicleDataset(Dataset):
     def get_default_transforms(train=True):
         if train:
             return A.Compose([
-                A.Resize(1024, 1024),
+                A.RandomBrightnessContrast(brightness_limit=0.15, contrast_limit=0.15, p=0.5),
                 A.HorizontalFlip(p=0.5),
+                A.GaussianBlur(blur_limit=(3, 7), p=0.3),
+                A.RGBShift(r_shift_limit=15, g_shift_limit=15, b_shift_limit=15, p=0.3),
+                A.CLAHE(clip_limit=3.0, tile_grid_size=(8, 8), p=0.3),
+                A.RandomGamma(gamma_limit=(80, 120), p=0.2),
+                
                 A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                A.Resize(1024, 1024),
                 ToTensorV2(),
             ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
         else:

@@ -9,8 +9,7 @@ from model import get_model
 from PIL import Image, ImageDraw
 from paths import test_img_dir
 from config import batch_size, num_workers
-from torchvision.ops import nms
-
+from utils import apply_nms_to_predictions
 
 def load_checkpoint(checkpoint_path, num_classes, device):
     """Load model from checkpoint"""
@@ -21,24 +20,6 @@ def load_checkpoint(checkpoint_path, num_classes, device):
     model.eval()
     return model
 
-def apply_nms_to_predictions(boxes, labels, scores, iou_threshold=0.5, score_threshold=0.3):
-    mask = scores > score_threshold
-    boxes = boxes[mask]
-    labels = labels[mask]
-    scores = scores[mask]
-    
-    if len(boxes) == 0:
-        return boxes.new_zeros((0, 4)), labels.new_zeros(0), scores.new_zeros(0)
-    
-    # Sort all boxes by score and apply NMS across classes
-    _, sorted_indices = scores.sort(descending=True)
-    boxes = boxes[sorted_indices]
-    labels = labels[sorted_indices]
-    scores = scores[sorted_indices]
-    
-    keep = nms(boxes, scores, iou_threshold=iou_threshold)
-    
-    return boxes[keep], labels[keep], scores[keep]
 
 def visualize_predictions(model, dataset, device, save_dir, num_samples=50):
     """Generate and save visualization of model predictions"""
@@ -87,13 +68,16 @@ def visualize_predictions(model, dataset, device, save_dir, num_samples=50):
         plt.close()
 
 def generate_predictions_file(model, dataset, device, output_path):
-    """Generate predictions file in the specified format"""
+    """Generate predictions file in the specified format with normalized coordinates"""
     model.eval()
     
     with open(output_path, 'w') as f:
         for idx in tqdm(range(len(dataset)), desc="Generating predictions"):
             image, target, _ = dataset[idx]
             image = image.to(device)
+            
+            # Get image dimensions for normalization
+            img_height, img_width = image.shape[1:3]
             
             with torch.no_grad():
                 prediction = model([image])[0]
@@ -113,7 +97,13 @@ def generate_predictions_file(model, dataset, device, output_path):
                 w = x2 - x1
                 h = y2 - y1
                 
-                f.write(f"{image_id} {label.item()} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {score.item():.6f}\n")
+                # Normalize coordinates
+                cx_norm = cx / img_width
+                cy_norm = cy / img_height
+                w_norm = w / img_width
+                h_norm = h / img_height
+                
+                f.write(f"{image_id} {label.item()} {cx_norm:.6f} {cy_norm:.6f} {w_norm:.6f} {h_norm:.6f} {score.item():.6f}\n")
 
 def main():
     # Configuration
@@ -146,7 +136,7 @@ def main():
     test_dataset = VehicleTestDataset(config['test_img_dir'])
     
     # Generate visualizations
-    visualize_predictions(model, test_dataset, config['device'], 'test_output')
+    # visualize_predictions(model, test_dataset, config['device'], 'test_output')
     
     # Generate predictions file
     generate_predictions_file(model, test_dataset, config['device'], 'test_output/predictions.txt')

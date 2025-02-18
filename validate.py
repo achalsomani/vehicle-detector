@@ -5,14 +5,17 @@ from tqdm import tqdm
 import numpy as np
 from data import VehicleDataset, collate_fn
 from torch.utils.data import DataLoader
-from model import get_model, evaluate_map_with_details
+from model import evaluate_map
 from test import load_checkpoint
+from torchvision.ops import nms
+from paths import val_img_dir, val_label_file
+from utils import apply_nms_to_predictions
 
 def evaluate_thresholds(model, val_loader, device, thresholds):
     results = []
     
     for threshold in tqdm(thresholds, desc="Evaluating thresholds"):
-        metrics = evaluate_map_with_details(
+        map = evaluate_map(
             model, 
             val_loader, 
             device, 
@@ -21,66 +24,25 @@ def evaluate_thresholds(model, val_loader, device, thresholds):
         
         results.append({
             'threshold': threshold,
-            'map': metrics['map'],
-            'precision': metrics['precision'],
-            'recall': metrics['recall'],
-            'precision_small': metrics['precision_small'],
-            'precision_medium': metrics['precision_medium'],
-            'precision_large': metrics['precision_large']
+            'map': map,
         })
     
     return results
 
-def plot_metrics(results, save_dir):
-    thresholds = [r['threshold'] for r in results]
-    
-    # Plot mAP, Precision, Recall
-    plt.figure(figsize=(10, 6))
-    plt.plot(thresholds, [r['map'] for r in results], 'b-', label='mAP')
-    plt.plot(thresholds, [r['precision'] for r in results], 'g-', label='Precision')
-    plt.plot(thresholds, [r['recall'] for r in results], 'r-', label='Recall')
-    plt.xlabel('Confidence Threshold')
-    plt.ylabel('Score')
-    plt.title('Model Performance vs Confidence Threshold')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(os.path.join(save_dir, 'threshold_metrics.png'))
-    plt.close()
-    
-    # Plot per-class precision
-    plt.figure(figsize=(10, 6))
-    plt.plot(thresholds, [r['precision_small'] for r in results], 'b-', label='Small')
-    plt.plot(thresholds, [r['precision_medium'] for r in results], 'g-', label='Medium')
-    plt.plot(thresholds, [r['precision_large'] for r in results], 'r-', label='Large')
-    plt.xlabel('Confidence Threshold')
-    plt.ylabel('Precision')
-    plt.title('Per-class Precision vs Confidence Threshold')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(os.path.join(save_dir, 'threshold_precision_by_class.png'))
-    plt.close()
 
 def visualize_image_predictions(image, predictions, save_path='prediction.png'):
-    """
-    Draw predictions on a single image with just class and score
-    """
-    # Convert tensor image to numpy for visualization
     img_np = image.cpu().permute(1, 2, 0).numpy()
-    
-    # Create figure
     plt.figure(figsize=(12, 8))
     plt.imshow(img_np)
     
-    # Colors for different classes
-    colors = ['r', 'g', 'b']  # red for class 1, green for 2, blue for 3
+    colors = ['r', 'g', 'b']
     
-    # Filter predictions by threshold
-    mask = predictions['scores'] >= 0.1
-    boxes = predictions['boxes'][mask]
-    labels = predictions['labels'][mask]
-    scores = predictions['scores'][mask]
+    boxes, labels, scores = apply_nms_to_predictions(
+        predictions['boxes'],
+        predictions['labels'],
+        predictions['scores']
+    )
     
-    # Draw each prediction
     for box, label, score in zip(boxes, labels, scores):
         x1, y1, x2, y2 = box.cpu().numpy()
         plt.gca().add_patch(plt.Rectangle(
@@ -96,11 +58,11 @@ def visualize_image_predictions(image, predictions, save_path='prediction.png'):
 
 def main():
     config = {
-        'num_classes': 3,  # 3 classes + background
+        'num_classes': 3,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'val_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/images',
-        'val_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/labels.txt',
-        'subset_size': 100  # Only use 50 images for quick testing
+        'val_img_dir': val_img_dir,
+        'val_label_file': val_label_file,
+        'subset_size': 10
     }
     
     # Load model (same as before)
@@ -146,20 +108,15 @@ def main():
     )
     
     # Evaluate model at different thresholds
-    thresholds = np.arange(0.1, 0.6, 0.2)
+    thresholds = [0.1, 0.5]
     results = evaluate_thresholds(model, val_loader, config['device'], thresholds)
-    
-    # Plot results
-    plot_metrics(results, output_dir)
     
     # Save numerical results
     with open(os.path.join(output_dir, 'threshold_results.txt'), 'w') as f:
-        f.write("Threshold | mAP | Precision | Recall | Small | Medium | Large\n")
+        f.write("Threshold | mAP \n")
         f.write("-" * 70 + "\n")
         for r in results:
-            f.write(f"{r['threshold']:.1f} | {r['map']:.4f} | {r['precision']:.4f} | "
-                   f"{r['recall']:.4f} | {r['precision_small']:.4f} | "
-                   f"{r['precision_medium']:.4f} | {r['precision_large']:.4f}\n")
+            f.write(f"{r['threshold']:.1f} | {r['map']:.4f}\n")
 
     # Create output directory
     os.makedirs('predictions', exist_ok=True)
@@ -167,7 +124,7 @@ def main():
     # Get a few predictions
     model.eval()
     with torch.no_grad():
-        for i in range(5):  # Look at first 5 images
+        for i in range(50):  # Look at first 5 images
             image, _ = val_dataset[i]
             predictions = model([image.to(config['device'])])[0]
             
