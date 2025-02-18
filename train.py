@@ -64,10 +64,10 @@ def compute_validation_loss(model, data_loader, device):
 def main(overfit=False):
     # Configuration
     config = {
-        'train_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/images',
-        'train_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/labels.txt',
-        'val_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/images',
-        'val_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/labels.txt',
+        'train_img_dir': '/dataset/train/images',
+        'train_label_file': '/dataset/train/labels.txt',
+        'val_img_dir': '/dataset/val/images',
+        'val_label_file': '/dataset/val/labels.txt',
         'num_classes': 3,
         'batch_size':16,
         'num_workers': 16,
