@@ -1,6 +1,8 @@
 .vscode/
 dataset/
 runs/
-checkpoints/
 lightning_logs/
 __pycache__/
+test_output/
+checkpoints/
+debug_data/
