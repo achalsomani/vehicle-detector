@@ -5,7 +5,8 @@ from data import get_dataloaders
 from model import get_model, evaluate_map, evaluate_map_with_details
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
-
+from paths import train_img_dir, train_label_file, val_img_dir, val_label_file
+from config import batch_size, num_workers
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, config, log_freq):
     model.train()
@@ -62,19 +63,18 @@ def compute_validation_loss(model, data_loader, device):
     return total_loss / num_batches
 
 def main(overfit=False):
-    # Configuration
     config = {
-        'train_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/images',
-        'train_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/labels.txt',
-        'val_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/images',
-        'val_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/labels.txt',
+        'train_img_dir': train_img_dir,
+        'train_label_file': train_label_file,
+        'val_img_dir': val_img_dir,
+        'val_label_file': val_label_file,
         'num_classes': 3,
-        'batch_size':32,
-        'num_workers': 32,
+        'batch_size': batch_size,
+        'num_workers': num_workers,
         'backbone_lr': 5e-5,
         'classifier_lr': 1e-4,
         'conf_threshold': 0.1,
-        'num_epochs': 30,
+        'num_epochs': 20,
         'device': 'cuda',
         'log_freq': 100,
         'overfit_dataset_size': 10
@@ -117,10 +117,10 @@ def main(overfit=False):
             backbone_params.append(param)
     
     # Create optimizer with different learning rates
-    optimizer = torch.optim.AdamW([
-        {'params': backbone_params, 'lr': config['backbone_lr']},
-        {'params': classifier_params, 'lr': config['classifier_lr']}
-    ])
+    optimizer = torch.optim.SGD([
+        {'params': backbone_params, 'lr': config['backbone_lr'], 'momentum': 0.9},
+        {'params': classifier_params, 'lr': config['classifier_lr'], 'momentum': 0.9}
+    ], weight_decay=1e-4)
     
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
