@@ -116,9 +116,9 @@ def main(overfit=False):
             backbone_params.append(param)
     
     # Create optimizer with different learning rates
-    optimizer = torch.optim.SGD([
-        {'params': backbone_params, 'lr': config['backbone_lr'], 'momentum': 0.9},
-        {'params': classifier_params, 'lr': config['classifier_lr'], 'momentum': 0.9}
+    optimizer = torch.optim.Adam([
+        {'params': backbone_params, 'lr': config['backbone_lr']},
+        {'params': classifier_params, 'lr': config['classifier_lr']}
     ], weight_decay=1e-4)
     
     # Learning rate scheduler
