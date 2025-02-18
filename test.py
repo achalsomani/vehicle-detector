@@ -7,6 +7,9 @@ from data import VehicleTestDataset, test_collate_fn
 from torch.utils.data import DataLoader
 from model import get_model
 from PIL import Image, ImageDraw
+from paths import test_img_dir
+from config import batch_size, num_workers
+
 
 def load_checkpoint(checkpoint_path, num_classes, device):
     """Load model from checkpoint"""
@@ -17,7 +20,7 @@ def load_checkpoint(checkpoint_path, num_classes, device):
     model.eval()
     return model
 
-def visualize_predictions(model, dataset, device, save_dir, num_samples=5):
+def visualize_predictions(model, dataset, device, save_dir, num_samples=50):
     """Generate and save visualization of model predictions"""
     # Create directory if it doesn't exist
     os.makedirs(save_dir, exist_ok=True)
@@ -36,25 +39,22 @@ def visualize_predictions(model, dataset, device, save_dir, num_samples=5):
         with torch.no_grad():
             prediction = model([image.to(device)])[0]
         
-        # Convert original image to PIL if it's not already
-        if isinstance(original_image, torch.Tensor):
-            original_image = original_image.permute(1, 2, 0).numpy()
-        image_pil = Image.fromarray(np.uint8(original_image))
-        draw = ImageDraw.Draw(image_pil)
+        original_image = original_image.resize(image.shape[1:3])
+
+        draw = ImageDraw.Draw(original_image)
         
         # Draw predicted boxes
         for box, label, score in zip(prediction['boxes'], prediction['labels'], prediction['scores']):
-            if score > 0.1:  # Only show predictions with confidence > 0.1
-                x1, y1, x2, y2 = box.cpu().numpy()
-                label = label.cpu().item()
-                score = score.cpu().item()
-                
-                # Draw box and label
-                draw.rectangle([x1, y1, x2, y2], outline=colors[label-1], width=3)
-                draw.text((x1, y1-10), f'{class_names[label-1]} {score:.2f}', 
-                         fill=colors[label-1])
+            x1, y1, x2, y2 = box.cpu().numpy()
+            label = label.cpu().item()
+            score = score.cpu().item()
+            
+            # Draw box and label
+            draw.rectangle([x1, y1, x2, y2], outline=colors[label-1], width=3)
+            draw.text((x1, y1-10), f'{class_names[label-1]} {score:.2f}', 
+                        fill=colors[label-1])
         
-        plt.imshow(image_pil)
+        plt.imshow(original_image)
         plt.axis('off')
         plt.title(f'Predictions - Sample {i+1}')
         plt.savefig(os.path.join(save_dir, f'prediction_{i+1}.png'))
@@ -97,9 +97,9 @@ def main():
     config = {
         'num_classes': 3,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'test_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/test/images',
-        'batch_size': 1,
-        'num_workers': 2
+        'test_img_dir': test_img_dir,
+        'batch_size': batch_size,
+        'num_workers': num_workers
     }
     
     # Create output directory
