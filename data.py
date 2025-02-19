@@ -13,16 +13,14 @@ class VehicleDataset(Dataset):
         self.is_train = is_train
         self.transform = transform or self.get_default_transforms(is_train)
         
-        # Group annotations by image_id
         self.image_annotations = {}
         with open(label_file, 'r') as f:
             for line in f:
                 values = line.strip().split()
                 img_id = int(values[0])
                 class_id = int(values[1])
-                bbox = list(map(float, values[2:]))  # [cx, cy, w, h]
+                bbox = list(map(float, values[2:])) 
                 
-                # Convert to XYXY format
                 x1 = bbox[0] - bbox[2]/2
                 y1 = bbox[1] - bbox[3]/2
                 x2 = bbox[0] + bbox[2]/2
@@ -37,7 +35,6 @@ class VehicleDataset(Dataset):
                 self.image_annotations[img_id]['boxes'].append([x1, y1, x2, y2])
                 self.image_annotations[img_id]['labels'].append(class_id)
         
-        # Convert to list for indexing
         self.image_ids = sorted(list(self.image_annotations.keys()))
 
     def set_overfit_dataset_size(self, overfit_dataset_size):
@@ -48,9 +45,9 @@ class VehicleDataset(Dataset):
         return len(self.image_ids)
 
     def __getitem__(self, idx):
-        img_id = self.image_ids[idx]  # Get the image_id from our list
-        ann = self.image_annotations[img_id]  # Use image_id to get annotations
-        img_name = f"{img_id:05d}.jpeg"  # Use actual image_id for filename
+        img_id = self.image_ids[idx]
+        ann = self.image_annotations[img_id]
+        img_name = f"{img_id:05d}.jpeg"
         img_path = os.path.join(self.img_dir, img_name)
         
         image = Image.open(img_path).convert('RGB')
@@ -137,13 +134,11 @@ def collate_fn(batch):
         targets.append(target)
     return torch.stack(images), targets 
 
-# Uncomment and modify the test dataset class
 class VehicleTestDataset(Dataset):
     def __init__(self, img_dir, transform=None):
         self.img_dir = img_dir
         self.transform = transform or self.get_default_transforms()
         
-        # Get all images from directory
         self.image_ids = []
         for img_name in sorted(os.listdir(img_dir)):
             if img_name.endswith('.jpeg'):
@@ -158,7 +153,6 @@ class VehicleTestDataset(Dataset):
         img_name = f"{img_id:05d}.jpeg"
         img_path = os.path.join(self.img_dir, img_name)
         
-        # Keep original image for visualization
         original_image = Image.open(img_path).convert('RGB')
         image = np.array(original_image)
         
@@ -175,26 +169,3 @@ class VehicleTestDataset(Dataset):
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ToTensorV2(),
         ])
-
-def get_test_dataloader(test_img_dir, batch_size=4, num_workers=4):
-    test_dataset = VehicleTestDataset(test_img_dir)
-    
-    test_loader = DataLoader(
-        test_dataset, 
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        collate_fn=test_collate_fn
-    )
-    
-    return test_loader
-
-def test_collate_fn(batch):
-    images = []
-    targets = []
-    original_images = []
-    for image, target, original_image in batch:
-        images.append(image)
-        targets.append(target)
-        original_images.append(original_image)
-    return torch.stack(images), targets, original_images 

@@ -6,13 +6,11 @@ import numpy as np
 from utils import apply_nms_to_predictions
 
 def get_model(num_classes):
-    # Load pre-trained model
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights='DEFAULT')
     
     for param in model.parameters():
         param.requires_grad = True
     
-    # Replace the classifier with num_classes + 1 (for background)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes + 1)
     

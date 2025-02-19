@@ -5,8 +5,6 @@ from data import get_dataloaders
 from model import get_model, evaluate_map
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
-from paths import train_img_dir, train_label_file, val_img_dir, val_label_file
-from config import batch_size, num_workers
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, config, log_freq):
     model.train()
@@ -14,15 +12,12 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, writer, config
     
     pbar = tqdm(data_loader, desc=f'Epoch {epoch}')
     for batch_idx, (images, targets) in enumerate(pbar):
-        # Move data to device
         images = [img.to(device) for img in images]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         
-        # Forward pass
         loss_dict = model(images, targets)
         losses = sum(loss for loss in loss_dict.values())
         
-        # Backward pass
         optimizer.zero_grad()
         losses.backward()
         optimizer.step()
@@ -54,7 +49,6 @@ def compute_validation_loss(model, data_loader, device):
             
             loss_dict = model(images, targets)
                 
-            # Sum up all the losses
             losses = sum(loss for loss in loss_dict.values())
             total_loss += losses.item()
             num_batches += 1
@@ -63,13 +57,13 @@ def compute_validation_loss(model, data_loader, device):
 
 def main(overfit=False):
     config = {
-        'train_img_dir': train_img_dir,
-        'train_label_file': train_label_file,
-        'val_img_dir': val_img_dir,
-        'val_label_file': val_label_file,
+        'train_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/images',
+        'train_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/train/labels.txt',
+        'val_img_dir': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/images',
+        'val_label_file': '/WAVE/projects/CSEN-342-Wi25/data/pr2/val/labels.txt',
         'num_classes': 3,
-        'batch_size': batch_size,
-        'num_workers': num_workers,
+        'batch_size': 16,
+        'num_workers': 16,
         'backbone_lr': 2e-5,
         'classifier_lr': 1e-4,
         'conf_threshold': 0.5,
@@ -79,19 +73,15 @@ def main(overfit=False):
         'overfit_dataset_size': 10
     }
     
-    # Create a simple run name with timestamp
     run_name = datetime.now().strftime('run_%m%d_%H%M%S')
     if overfit:
         run_name += "_overfit"
     
-    # Initialize TensorBoard writer
     writer = SummaryWriter(log_dir=f'runs/{run_name}')
     writer.add_text('config', str(config))
     
-    # Create output directory
     os.makedirs('checkpoints', exist_ok=True)
     
-    # Get dataloaders
     train_loader, val_loader = get_dataloaders(
         config['train_img_dir'],
         config['train_label_file'],
@@ -105,7 +95,6 @@ def main(overfit=False):
     model = get_model(config['num_classes'])
     model = model.to(config['device'])
     
-    # Separate backbone and classifier parameters
     backbone_params = []
     classifier_params = []
     
@@ -115,32 +104,26 @@ def main(overfit=False):
         else:
             backbone_params.append(param)
     
-    # Create optimizer with different learning rates
     optimizer = torch.optim.Adam([
         {'params': backbone_params, 'lr': config['backbone_lr']},
         {'params': classifier_params, 'lr': config['classifier_lr']}
     ], weight_decay=1e-4)
     
-    # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.2, patience=2, verbose=True
     )
     
-    # Training loop
     best_map = 0
     for epoch in range(config['num_epochs']):
-        # Train
         train_loss = train_one_epoch(
             model, optimizer, train_loader, 
             config['device'], epoch, writer, 
             config, config['log_freq']
         )
         
-        # Evaluate
         val_loss = compute_validation_loss(model, val_loader, config['device'])
         val_map = evaluate_map(model, val_loader, config['device'], conf_threshold=config['conf_threshold'])
         
-        # Log metrics
         writer.add_scalar('loss/train_epoch', train_loss, epoch)
         writer.add_scalar('loss/val_epoch', val_loss, epoch)
         writer.add_scalar('metrics/val_mAP', val_map, epoch)
@@ -152,7 +135,6 @@ def main(overfit=False):
         print(f"Validation loss: {val_loss:.4f}")
         print(f"Validation mAP: {val_map:.4f}")
         
-        # Save best model
         if val_map > best_map:
             best_map = val_map
             torch.save({
