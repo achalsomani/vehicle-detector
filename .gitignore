@@ -6,3 +6,9 @@ __pycache__/
 test_output/
 checkpoints/
 debug_data/
+logs/
+path/
+predictions/
+train.sh
+validation/
+vehicle_detection.ipynb
